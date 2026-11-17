@@ -1,0 +1,76 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Create Android project
+        run: |
+          mkdir app && cd app
+          npm init -y > /dev/null
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          mkdir www && cp ../index.html www/index.html
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "io.github.alidhahi1987.ninevehschool",
+            "appName": "ثانوية نينوى للمتميزين",
+            "webDir": "www",
+            "server": { "url": "https://alidhahi1987-byte.github.io/nineveh-school/" }
+          }
+          EOF
+          npx cap add android
+
+      - name: App icon and splash from school logo
+        run: |
+          sudo apt-get install -y -qq imagemagick > /dev/null
+          cd app
+          node -e "const fs=require('fs');const s=fs.readFileSync('www/index.html','utf8');const m=s.match(/data:image\/\w+;base64,([A-Za-z0-9+\/=]+)/);fs.writeFileSync('logo.img',Buffer.from(m[1],'base64'))"
+          RES=android/app/src/main/res
+          rm -rf $RES/mipmap-anydpi-v26
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            n=${d%%:*}; s=${d##*:}
+            mkdir -p $RES/mipmap-$n
+            for f in ic_launcher ic_launcher_round ic_launcher_foreground; do
+              convert logo.img -resize ${s}x${s} -background white -gravity center -extent ${s}x${s} $RES/mipmap-$n/$f.png
+            done
+          done
+          find $RES -name splash.png | while read f; do
+            W=$(identify -format %w "$f"); H=$(identify -format %h "$f")
+            M=$(( (W<H?W:H) * 2 / 5 ))
+            convert logo.img -resize ${M}x${M} -background white -gravity center -extent ${W}x${H} "$f"
+          done
+
+      - name: Build APK
+        run: |
+          cd app/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -q
+          cp app/build/outputs/apk/debug/app-debug.apk ../../nineveh-school.apk
+
+      - name: Publish download link
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: تطبيق أندرويد – الإصدار ${{ github.run_number }}
+          files: nineveh-school.apk
+          make_latest: true
